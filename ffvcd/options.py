@@ -260,11 +260,18 @@ class FarisName(FreeText):
     display_name = "Faris's Name"
     default = "Faris"
 
-class PianoPercent(Toggle):
+class Goal(Choice):
+    """Determines the condition required to complete the game.
+
+    Neo Exdeath: Defeat the final Exdeath and Neo Exdeath encounter in the Void.
+    Exdeath 2: Defeat Exdeath in his World 2 castle.
+    Piano Percent: Play all eight pianos.
     """
-    For the memes! Alternatively send goal completed when all pianos are played.
-    """
-    display_name = "Piano Percent"
+    display_name = "Goal"
+    option_neo_exdeath = 0
+    option_exdeath_2 = 1
+    option_piano_percent = 2
+    default = 0
 
 # making this mixin so we can keep actual game options separate from AP core options that we want enabled
 # not sure why this isn't a mixin in core atm, anyways
@@ -295,4 +302,4 @@ class ffvcd_options(PerGameCommonOptions, StartInventoryFromPoolMixin):
     galuf_name: GalufName
     krile_name: KrileName
     faris_name: FarisName
-    piano_percent: PianoPercent
+    goal: Goal
