@@ -217,10 +217,7 @@ class FFVCDWorld(World):
         else:
             options_conductor['trapped_chests'] = False
 
-        if self.options.piano_percent:
-            options_conductor['piano_percent'] = True
-        else:
-            options_conductor['piano_percent'] = False
+        options_conductor['goal'] = self.options.goal.value
 
         options_conductor['source_rom_abs_path'] = self.source_rom_abs_path
         options_conductor['world_lock'] = self.world_lock
@@ -319,7 +316,7 @@ class FFVCDWorld(World):
         logger.debug("Finished generate_output function")
         
     def fill_slot_data(self):
-        slot_data = self.options.as_dict("four_job", "world_lock", "progression_checks", "trapped_chests")
+        slot_data = self.options.as_dict("four_job", "world_lock", "progression_checks", "trapped_chests", "goal")
         #this might look inefficient but due to order of operations this is the simplest way to pull starting ability currently
         slot_data['starting crystals'] = self.starting_crystals
         crystal_id_list = \
