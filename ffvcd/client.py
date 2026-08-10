@@ -41,6 +41,8 @@ FFVCD_RECV_PROGRESS_ADDR = WRAM_START + 0x9F4
 FFVCD_FILE_NAME_ADDR = WRAM_START + 0x5D9
 
 FFVCD_GOAL_SETTINGS = 0x3FFFFF
+goal_exdeath_2 = 1 << 0
+goal_piano_percent = 1 << 1
 
 tracker_event_locations = ["ExDeath","ExDeath World 2","Piano (Tule)","Piano (Carwen)","Piano (Karnak)",
                            "Piano (Jacole)","Piano (Crescent)","Piano (Mua)","Piano (Rugor)","Piano (Mirage)"]
@@ -98,6 +100,7 @@ class FFVCDSNIClient(SNIClient):
 
 
         goal_flags = await snes_read(ctx,FFVCD_GOAL_SETTINGS,0x1)
+        goal_setting = goal_flags[0] if goal_flags else 0
 
 
 
@@ -154,17 +157,24 @@ class FFVCDSNIClient(SNIClient):
                     status1 = check_status_bits(ram_byte, 0, direction)
                     status2 = check_status_bits(ram_byte, 1, direction)
                     status3 = check_status_bits(ram_byte, 2, direction)
-                    if status1 and status2 and status3:
-                        status = True
-                        # Handle Victory
-                        if not ctx.finished_game:
-                            await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
-                            ctx.finished_game = True
-                    else:
-                        status = False
-                elif event_flag_addr in piano_addresses and check_status_bits(goal_flags[0],1,1): #is piano percent on
+                    status = status1 and status2 and status3
+                    if (status
+                            and not (goal_setting & (goal_exdeath_2 | goal_piano_percent))
+                            and not ctx.finished_game):
+                        await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
+                        ctx.finished_game = True
+                elif event_flag_addr == 0xC0FFFE:
                     status = check_status_bits(ram_byte, loc_bit, direction)
-                    if ram_dict[FFVCD_PIANO_ADDRESS] == 255 and not ctx.finished_game:
+                    if (status
+                            and goal_setting & goal_exdeath_2
+                            and not ctx.finished_game):
+                        await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
+                        ctx.finished_game = True
+                elif event_flag_addr in piano_addresses:
+                    status = check_status_bits(ram_byte, loc_bit, direction)
+                    if (goal_setting & goal_piano_percent
+                            and ram_dict[FFVCD_PIANO_ADDRESS] == 0xFF
+                            and not ctx.finished_game):
                         await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
                         ctx.finished_game = True
                 # normal case
@@ -301,48 +311,53 @@ class FFVCDSNIClient(SNIClient):
 
 
                 if arch_item_id in item_ram_data.keys():
-                    if ctx.slot == item.player:
-                        pass
+                    # Local location rewards are already granted by the ROM, so receiving
+                    # them again through Archipelago would duplicate the item. Cheat items
+                    # (!getitem) use the special location ID -1 and MUST be written to inventory.
+                    is_local_location_reward = ctx.slot == item.player and item.location >= 0
 
-                    else:
-
+                    if not is_local_location_reward:
                         d4 = await snes_read(ctx, WRAM_START + 0x640, 0x100)
-
-                        ram_current_item_map = {}
-
-                        for idx, i in enumerate(d4):
-                            ram_current_item_map[idx] = hex(i).replace("0x","").upper()
-
-                        for k, v in ram_current_item_map.items():
-                            if len(v) == 1:
-                                ram_current_item_map[k] = "0%s" % v
-
+                        ram_current_item_map = {idx: item_id for idx, item_id in enumerate(d4)}
                         new_item_byte = item_ram_data[arch_item_id]
 
-                        match_idx = None
-                        for k, v in ram_current_item_map.items():
-                            if v == new_item_byte:
-                                match_idx = k
-                                break
+                        match_idx = next(
+                            (idx for idx, item_id in ram_current_item_map.items()
+                             if item_id == new_item_byte),
+                            None,
+                        )
 
-                        if match_idx:
-                            # if a match was found, find its corresponding inventory count then add 1
-                            item_count_in_inventory = await snes_read(ctx, WRAM_START + 0x740 + match_idx, 0x01)
+                        if match_idx is not None:
+                            # If a match was found, add one to its corresponding count.
+                            item_count_in_inventory = await snes_read(
+                                ctx, WRAM_START + 0x740 + match_idx, 0x01
+                            )
                             item_count_in_inventory = min(item_count_in_inventory[0] + 1, 99)
-                            snes_buffered_write(ctx, WRAM_START + 0x740 + match_idx, bytes([item_count_in_inventory]))
+                            snes_buffered_write(
+                                ctx,
+                                WRAM_START + 0x740 + match_idx,
+                                bytes([item_count_in_inventory]),
+                            )
                         else:
-                            # if a match was not found, find the first 00 slot in inventory ids, then assign it and give it 1 count
-                            new_item_idx = None
-                            for k, v in ram_current_item_map.items():
-                                if v == '00':
-                                    new_item_idx = k
-                                    break
+                            # Otherwise, place it in the first empty inventory slot.
+                            new_item_idx = next(
+                                (idx for idx, item_id in ram_current_item_map.items()
+                                 if item_id == 0x00),
+                                None,
+                            )
 
-                            if new_item_idx:
-                                snes_buffered_write(ctx, WRAM_START + 0x640 + new_item_idx, bytes([new_item_byte]))
-                                snes_buffered_write(ctx, WRAM_START + 0x740 + new_item_idx, bytes([1]))
-                            else:
-                                pass
+                            if new_item_idx is not None:
+                                snes_buffered_write(
+                                    ctx,
+                                    WRAM_START + 0x640 + new_item_idx,
+                                    bytes([new_item_byte]),
+                                )
+                                snes_buffered_write(
+                                    ctx,
+                                    WRAM_START + 0x740 + new_item_idx,
+                                    bytes([1]),
+                                )
+
 
                 ##############
                 # RECEIVE GIL
@@ -350,9 +365,8 @@ class FFVCDSNIClient(SNIClient):
 
 
                 if arch_item_id in gil_ram_data.keys():
-                    if ctx.slot == item.player:
-                        pass
-                    else:
+                    is_local_location_reward = ctx.slot == item.player and item.location >= 0
+                    if not is_local_location_reward:
 
 
                         current_bytes = await snes_read(ctx, WRAM_START + 0x947, 0x03)
