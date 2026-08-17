@@ -40,16 +40,16 @@ class Reward:
 
     @property
     def asar_output(self):
-        
-        if hasattr(self, 'reward_arch_mib_flag') and hasattr(self, 'mib_chest_id'):
-            return f"org ${self.address} \ndb ${self.mib_chest_id}, ${self.collectible.patch_id}"
-        if self.mib_type is None:
-            try:
+        if self.collectible is None:
+            return ""
+        try:
+            if hasattr(self, 'reward_arch_mib_flag') and hasattr(self, 'mib_chest_id') and self.mib_chest_id:
+                return f"org ${self.address} \ndb ${self.mib_chest_id}, ${self.collectible.patch_id}"
+            if self.mib_type is None:
                 return f"org ${self.address} \ndb ${self.collectible.reward_type}, ${self.collectible.patch_id}"
-            except:
-                pass
-        else:
             return f"org ${self.address} \ndb ${self.mib_type}, ${self.collectible.patch_id}"
+        except Exception:
+            return ""
     
     @property
     def short_output(self):
@@ -118,14 +118,14 @@ class RewardManager:
     def get_spoiler(self, world_lock, free_tablets, trapped_chests):
         
         output = "-----BOSS CHECKS------\n"
-        keys = [x for x in self.rewards if x.reward_style == "key"]
+        keys = [x for x in self.rewards if x.reward_style == "key" and x.collectible is not None]
         keys = sorted(keys, key = lambda i: i.description)
         for i in keys:
             output = output + "{:<40}".format("{:<40}".format(i.description)+"{:<40}".format(i.collectible.reward_name))+"\n"
 
         if trapped_chests:
             output += "\n-----TRAPPED CHESTS/MIB------\n"
-            keys = [x for x in self.rewards]
+            keys = [x for x in self.rewards if x.collectible is not None]
             keys = sorted(keys, key = lambda i: i.description)
             for i in keys:
                 if i.reward_arch_mib_flag:
