@@ -16,8 +16,10 @@ def create_region(multiworld: MultiWorld, player: int, region_name: str, parent_
     return ret
 
 def setup_region_and_entrance(multiworld, player, region_name, parent_region_name, 
-                              access_rule = None, region_rank = 0):
-    
+                              access_rule = None, region_rank = 0, skip = False):
+    if skip:
+        return
+
     parent_region = multiworld.get_region(parent_region_name, player)
     new_region = create_region(multiworld, player, region_name, parent_region, region_rank)
     new_entrance = Entrance(player, region_name, parent_region)
@@ -28,6 +30,9 @@ def setup_region_and_entrance(multiworld, player, region_name, parent_region_nam
     multiworld.regions.append(new_region)
 
 def create_regions(multiworld, player: int):
+    # Exdeath 2 is a World 2 goal; World 3 checks would be behind the win condition.
+    exclude_world3 = multiworld.worlds[player].options.goal.value == 1
+
     menu_region = create_region(multiworld, player, 'Menu')
     multiworld.regions.append(menu_region)
 
@@ -41,20 +46,21 @@ def create_regions(multiworld, player: int):
                               lambda state: ((state.has("Adamantite", player)\
                               and state.has("Bracelet", player)\
                               and state.has("Anti Barrier", player)))\
-                              or (state.has("World 3 Access (Item)", player)))
+                              or (state.has("World 3 Access (Item)", player)),
+                              skip = exclude_world3)
 
 
     setup_region_and_entrance(multiworld, player, "Ancient Library", "World 1 Access", access_rule = None,
                               region_rank = 3)
     setup_region_and_entrance(multiworld, player, "Ancient Library (World 3)", "World 3 Access", access_rule = None,
-                              region_rank = 7)
+                              region_rank = 7, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Ancient Library Lower", "World 1 Access", access_rule =\
                               lambda state: state.has("Ifrit's Fire", player),
                                                         region_rank = 4)
     setup_region_and_entrance(multiworld, player, "Bal Castle", "World 2 Access", access_rule = None,
                               region_rank = 5)
     setup_region_and_entrance(multiworld, player, "Bal Castle Lower", "World 3 Access", access_rule = None,
-                              region_rank = 8)
+                              region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Barrier Tower", "World 2 Access", access_rule = \
                               lambda state: state.has("Submarine Key", player),
                                                         region_rank = 8)
@@ -81,11 +87,11 @@ def create_regions(multiworld, player: int):
                                                         region_rank = 5)
     setup_region_and_entrance(multiworld, player, "Fork Tower", "World 3 Access", access_rule = \
                               lambda state: state.has("Elder Branch", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Great Trench", "World 3 Access", access_rule = \
                               lambda state: state.has("Trench Page", player)\
                               and state.has("Submarine Key", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Hiryuu Valley", "World 2 Access", access_rule = None,
                               region_rank = 6)
     setup_region_and_entrance(multiworld, player, "Istory", "World 1 Access", access_rule = None,
@@ -93,7 +99,7 @@ def create_regions(multiworld, player: int):
     setup_region_and_entrance(multiworld, player, "Istory Falls", "World 3 Access", access_rule = \
                           lambda state: state.has("Falls Page", player)\
                               and state.has("Submarine Key", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Jacole", "World 1 Access", access_rule = None,
                               region_rank = 5)
     setup_region_and_entrance(multiworld, player, "Karnak (On Fire)", "World 1 Access", access_rule = None)
@@ -116,7 +122,7 @@ def create_regions(multiworld, player: int):
                               region_rank = 5)
     setup_region_and_entrance(multiworld, player, "Mirage Village", "World 3 Access", access_rule = \
                               lambda state: state.has("Mirage Radar", player),
-                                                        region_rank = 9)
+                                                        region_rank = 9, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Moogle Village", "World 2 Access", access_rule =\
                               lambda state: state.has("Moogle Suit", player),
                                                         region_rank = 6)
@@ -131,42 +137,42 @@ def create_regions(multiworld, player: int):
                               region_rank = 2)
     setup_region_and_entrance(multiworld, player, "North Mountain (World 3)", "World 3 Access", access_rule = \
                               lambda state: state.has("Mirage Radar", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Phoenix Tower", "World 3 Access", access_rule = \
                               lambda state: state.has("Mirage Radar", player),
-                                                        region_rank = 9)
+                                                        region_rank = 9, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Pirate's Cave", "World 1 Access", access_rule = None,
                               region_rank = 1)
     setup_region_and_entrance(multiworld, player, "Pyramid", "World 3 Access", access_rule = \
                               lambda state: state.has("Pyramid Page", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Rift (1 Tablet)", "World 3 Access", access_rule = \
                               lambda state: state.has("1st Tablet", player),
-                                                        region_rank = 9)
+                                                        region_rank = 9, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Rift (2 Tablets)", "World 3 Access", access_rule = \
                               lambda state: state.has("1st Tablet", player) and 
                               state.has("2nd Tablet", player),
-                                                        region_rank = 9)
+                                                        region_rank = 9, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Rift (3 Tablets)", "World 3 Access", access_rule = \
                               lambda state: state.has("1st Tablet", player) and 
                               state.has("2nd Tablet", player) and
                               state.has("3rd Tablet", player),
-                                                        region_rank = 10)
+                                                        region_rank = 10, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Rift (4 Tablets)", "World 3 Access", access_rule = \
                               lambda state: state.has("1st Tablet", player) and 
                               state.has("2nd Tablet", player) and
                               state.has("3rd Tablet", player) and
                               state.has("4th Tablet", player),
-                                                        region_rank = 10)
+                                                        region_rank = 10, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Rugor", "World 3 Access", access_rule = None,
-                              region_rank = 6)
+                              region_rank = 6, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Ruined City", "World 1 Access", access_rule = None,
                               region_rank = 4)
     setup_region_and_entrance(multiworld, player, "Ship Graveyard", "World 1 Access", access_rule = None,
                               region_rank = 2)
     setup_region_and_entrance(multiworld, player, "Solitary Island", "World 3 Access", access_rule = \
                               lambda state: state.has("Shrine Page", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Steamship", "World 1 Access", access_rule = \
                               lambda state: state.has("Steamship Key", player),
                                                         region_rank = 3)
@@ -177,7 +183,7 @@ def create_regions(multiworld, player: int):
     setup_region_and_entrance(multiworld, player, "Tule", "World 1 Access", access_rule = None,
                               region_rank = 1)
     setup_region_and_entrance(multiworld, player, "Tule Pass", "World 3 Access", access_rule = None,
-                              region_rank = 7)
+                              region_rank = 7, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Tycoon Castle", "World 1 Access", access_rule = None,
                               region_rank = 1)
     setup_region_and_entrance(multiworld, player, "Tycoon Meteor", "World 1 Access", access_rule = None,
@@ -187,7 +193,7 @@ def create_regions(multiworld, player: int):
                               state.has("2nd Tablet", player) and
                               state.has("3rd Tablet", player) and
                               state.has("4th Tablet", player),
-                                                        region_rank = 10)
+                                                        region_rank = 10, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Walse Town", "World 1 Access", access_rule = None,
                               region_rank = 2)
     setup_region_and_entrance(multiworld, player, "Walse Castle", "World 1 Access", access_rule = None,
@@ -199,7 +205,7 @@ def create_regions(multiworld, player: int):
                                                         region_rank = 2)
     setup_region_and_entrance(multiworld, player, "Walse Tower Sunken", "World 3 Access", access_rule = 
                               lambda state: state.has("Submarine Key", player),
-                                                        region_rank = 8)
+                                                        region_rank = 8, skip = exclude_world3)
     setup_region_and_entrance(multiworld, player, "Wind Shrine", "World 1 Access", access_rule = None,
                               region_rank = 1)
     setup_region_and_entrance(multiworld, player, "Zeza Fleet", "World 2 Access", access_rule = \
@@ -207,16 +213,12 @@ def create_regions(multiworld, player: int):
                                                         region_rank = 7)
 
     
-    void_region = multiworld.get_region("Void", player)
-    exdeath = multiworld.get_location("ExDeath", player)
-    exdeath.parent_region = void_region
-    # void_region.locations.append(exdeath)
-
-
-
-
-    add_rule(exdeath, lambda state: state.has("1st Tablet", player) and state.has("2nd Tablet", player) \
-             and state.has("3rd Tablet", player) and state.has("4th Tablet", player))
+    if not exclude_world3:
+        void_region = multiworld.get_region("Void", player)
+        exdeath = multiworld.get_location("ExDeath", player)
+        exdeath.parent_region = void_region
+        add_rule(exdeath, lambda state: state.has("1st Tablet", player) and state.has("2nd Tablet", player) \
+                 and state.has("3rd Tablet", player) and state.has("4th Tablet", player))
          
 
 class FFVCDRegion(Region):

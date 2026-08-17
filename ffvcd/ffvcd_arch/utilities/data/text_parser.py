@@ -13,6 +13,17 @@ class TextParser():
         self.text_dict = load_json_data(os.path.join('tables','text_tables', 'json','text_table_chest.json'))
         self.text_dict2 = dict((v,k) for k,v in self.text_dict.items())
 
+    def _encode_next(self, text, counter):
+        """Encode one character or <token>, always advancing so unmatched '<' cannot hang."""
+        char = text[counter]
+        if char == "<":
+            right = text.find(">", counter)
+            if right == -1:
+                return self.text_dict2.get(char, "00"), counter + 1
+            token = text[counter:right + 1]
+            return self.text_dict2.get(token, "00"), right + 1
+        return self.text_dict2.get(char, "00"), counter + 1
+
 
     def run_decrypt(self, byte_list):
         new_bytes = []
@@ -145,24 +156,8 @@ class TextParser():
         counter = 0
         text_list = []
         while counter < len(x):
-            char = x[counter]
-            if char == "<":
-                left = x.find("<")
-                right = x.find(">")+1
-                new_char = x[left:right]
-                if new_char not in self.text_dict2:
-                    new_char = ' '
-                else:
-                    new_char = self.text_dict2[new_char]
-                text_list.append(new_char)
-                counter = right
-            else:    
-                if char not in self.text_dict2:
-                    new_char = ' '
-                else:
-                    new_char = self.text_dict2[char]
-                text_list.append(new_char)
-                counter = counter + 1
+            encoded, counter = self._encode_next(x, counter)
+            text_list.append(encoded)
         text_asar = 'db'
         if ff_fill != None:
             new_len = ff_fill - len(text_list)
@@ -188,28 +183,12 @@ class TextParser():
         text_list = []
         while counter < len(x):
             char = x[counter]
-            if char == "<":
-                left = x.find("<")
-                right = x.find(">")+1
-                new_char = x[left:right]
-                new_char = x[left:right]
-                if new_char not in self.text_dict2:
-                    new_char = ' '
-                else:
-                    new_char = self.text_dict2[new_char]
-                text_list.append(new_char)
-
-                counter = right
-            elif char == "|":
+            if char == "|":
                 text_list.append("01")
                 counter = counter + 1
-            else:    
-                if char not in self.text_dict2:
-                    new_char = ' '
-                else:
-                    new_char = self.text_dict2[char]
-                text_list.append(new_char)
-                counter = counter + 1
+            else:
+                encoded, counter = self._encode_next(x, counter)
+                text_list.append(encoded)
         text_asar = 'db'
         for i in text_list:
             text_asar = text_asar + " $" + i + ","

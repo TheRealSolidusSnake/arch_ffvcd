@@ -5,10 +5,11 @@ from typing import ClassVar
 from BaseClasses import MultiWorld, Tutorial, ItemClassification
 from worlds.AutoWorld import World, WebWorld
 from worlds.generic.Rules import add_rule, add_item_rule
+from Options import OptionError
 from .items import item_table, item_groups, create_item, create_world_items, arch_item_offset, \
     WORLD2_ACCESS_ITEM_ID, WORLD3_ACCESS_ITEM_ID, ITEM_CODE_GIL, ITEM_CODE_FUNGIBLE
 from .locations import location_data, loc_id_start
-from .options import ffvcd_options
+from .options import ffvcd_options, sanitize_character_name
 from .regions import create_regions
 from .rules import set_rules
 from .ffvcd_arch.utilities.data import conductor
@@ -81,6 +82,13 @@ class FFVCDWorld(World):
 
     def __init__(self, world: MultiWorld, player: int):
         self.rom_name_available_event = threading.Event()
+        # Must be instance lists: class-level appends leak across fuzzer worker seeds
+        # and can lock CornaJar behind Catch/Trainer that are not in this world.
+        self.placed_crystals = []
+        self.placed_abilities = []
+        self.placed_magic = []
+        self.starting_crystals = None
+        self.cond = None
         super().__init__(world, player)
 
 
@@ -97,6 +105,20 @@ class FFVCDWorld(World):
     def generate_early(self):
         self.starting_items = Counter()
         self.world_lock = self.options.world_lock.value + 1
+        exclude_world3 = self.options.goal.value == 1
+
+        if len(self.options.jobs_included.value) < 1:
+            raise OptionError("At least one job must be included.")
+        if self.options.four_job and len(self.options.jobs_included.value) < 4:
+            raise OptionError("Four Job Mode requires at least 4 jobs in Jobs Included.")
+        if (self.options.disable_tier_1_magic and self.options.disable_tier_2_magic
+                and self.options.disable_tier_3_magic):
+            raise OptionError("Must include at least one tier of magic.")
+        if self.options.goal.value == 1 and self.options.world_lock.value == 2:
+            raise OptionError(
+                "Exdeath 2 cannot be combined with World 3 starting access, "
+                "because World 3 locations are removed from the pool."
+            )
         
         if self.world_lock == 2:
             new_item = create_item("World 2 Access (Item)",  
@@ -112,12 +134,13 @@ class FFVCDWorld(World):
                         self.player, ['World Access'])
             self.starting_items[new_item] = 1
             self.multiworld.push_precollected(new_item)
-            new_item = create_item("World 3 Access (Item)",  
-                        ItemClassification.progression, 
-                        None, 
-                        self.player, ['World Access'])
-            self.starting_items[new_item] = 1
-            self.multiworld.push_precollected(new_item)
+            if not exclude_world3:
+                new_item = create_item("World 3 Access (Item)",  
+                            ItemClassification.progression, 
+                            None, 
+                            self.player, ['World Access'])
+                self.starting_items[new_item] = 1
+                self.multiworld.push_precollected(new_item)
             
     def create_item(self, name: str):
         item_data = item_table[name]
@@ -168,13 +191,36 @@ class FFVCDWorld(World):
         for ability in [i for i in self.placed_items if ITEM_CODE_ABILITIES in getattr(i, "groups")]: self.placed_abilities.append(getattr(ability,"name"))
         for crystal in [i for i in self.placed_items if ITEM_CODE_CRYSTALS in getattr(i, "groups")]: self.placed_crystals.append(getattr(crystal,"name"))
 
-        if "Trainer Crystal" not in self.starting_crystals:
-            if "Catch Ability" in self.placed_abilities or "Trainer Crystal" in self.placed_crystals:
-                add_rule(self.multiworld.get_location("Kelb - CornaJar at Kelb (CornaJar)", self.player),
-                lambda state: state.has("Catch Ability", self.player, 1) or state.has("Trainer Crystal", self.player, 1))
-            else:
-                add_item_rule(self.multiworld.get_location("Kelb - CornaJar at Kelb (CornaJar)", self.player), \
-                lambda item: not (item.classification & (ItemClassification.progression or ItemClassification.useful)) and item.player == self.player)
+        placed_names = {item.name for item in self.placed_items}
+        catch_in_logic = (
+            "Trainer Crystal" in self.starting_crystals
+            or "Catch Ability" in placed_names
+            or "Trainer Crystal" in placed_names
+        )
+        corna_jar = self.multiworld.get_location("Kelb - CornaJar at Kelb (CornaJar)", self.player)
+        if catch_in_logic:
+            # Starting Trainer is not a pooled item; precollect it so the access rule can see it.
+            if "Trainer Crystal" in self.starting_crystals:
+                trainer = self.create_item("Trainer Crystal")
+                self.starting_items[trainer] = 1
+                self.multiworld.push_precollected(trainer)
+            add_rule(corna_jar,
+            lambda state: state.has("Catch Ability", self.player, 1) or state.has("Trainer Crystal", self.player, 1))
+        else:
+            corna_jar.parent_region.locations.remove(corna_jar)
+            dropped = None
+            for i, item in enumerate(self.placed_items):
+                groups = getattr(item, "groups", [])
+                if ITEM_CODE_FUNGIBLE in groups or ITEM_CODE_GIL in groups:
+                    dropped = self.placed_items.pop(i)
+                    break
+            if dropped is None:
+                for i, item in enumerate(self.placed_items):
+                    if not item.advancement:
+                        dropped = self.placed_items.pop(i)
+                        break
+            if dropped is not None and dropped in self.multiworld.itempool:
+                self.multiworld.itempool.remove(dropped)
 
         add_rule(self.multiworld.get_location("Crescent Island - Power Song from Crescent Town (Power)", self.player),
         lambda state: state.has("Adamantite", self.player, 1) or state.has("World 2 Access (Item)", self.player, 1))
@@ -182,14 +228,21 @@ class FFVCDWorld(World):
         add_rule(self.multiworld.get_location("Piano (Mua)", self.player), \
         lambda state: state.can_reach("Mua", "Region", self.player))
 
-        add_rule(self.multiworld.get_location("Piano (Rugor)", self.player),
-        lambda state: state.can_reach("Rugor", "Region", self.player))
+        # Hero Song and the World 3 pianos require Mirage/Rugor. Skip those rules
+        # when World 3 is omitted from the pool (Exdeath 2).
+        hero_song_location = "Crescent Island - Hero Song from Crescent Town (Hero)"
+        if self.options.goal.value != 1:
+            add_rule(self.multiworld.get_location("Piano (Rugor)", self.player),
+            lambda state: state.can_reach("Rugor", "Region", self.player))
 
-        add_rule(self.multiworld.get_location("Crescent Island - Hero Song from Crescent Town (Hero)", self.player), \
-        lambda state: state.can_reach("Mirage Village", "Region", self.player))
+            add_rule(self.multiworld.get_location(hero_song_location, self.player), \
+            lambda state: state.can_reach("Mirage Village", "Region", self.player))
 
-        add_rule(self.multiworld.get_location("Piano (Mirage)", self.player), \
-        lambda state: state.can_reach("Mirage Village", "Region", self.player))
+            add_rule(self.multiworld.get_location("Piano (Mirage)", self.player), \
+            lambda state: state.can_reach("Mirage Village", "Region", self.player))
+        else:
+            add_item_rule(self.multiworld.get_location(hero_song_location, self.player),
+            lambda item: not (item.classification & ItemClassification.progression and item.player == self.player))
  
     def parse_options_for_conductor(self):
         # this sets up a config file from archipelago's options
@@ -218,6 +271,7 @@ class FFVCDWorld(World):
             options_conductor['trapped_chests'] = False
 
         options_conductor['goal'] = self.options.goal.value
+        options_conductor['piano_percent'] = self.options.goal.value == 2
 
         options_conductor['source_rom_abs_path'] = self.source_rom_abs_path
         options_conductor['world_lock'] = self.world_lock
@@ -226,10 +280,12 @@ class FFVCDWorld(World):
         options_conductor['all_player_names'] = self.multiworld.player_name
         options_conductor['starting_crystals'] = self.starting_crystals
         options_conductor['ability_settings'] = self.options.ability_settings
-        options_conductor['character_names'] = {"Lenna": self.options.lenna_name.value,
-            "Galuf": self.options.galuf_name.value,
-            "Krile": self.options.krile_name.value,
-            "Faris": self.options.faris_name.value,}
+        options_conductor['character_names'] = {
+            "Lenna": sanitize_character_name(self.options.lenna_name.value, "Lenna"),
+            "Galuf": sanitize_character_name(self.options.galuf_name.value, "Galuf"),
+            "Krile": sanitize_character_name(self.options.krile_name.value, "Krile"),
+            "Faris": sanitize_character_name(self.options.faris_name.value, "Faris"),
+        }
 
         self.options_conductor = options_conductor
 
@@ -245,6 +301,13 @@ class FFVCDWorld(World):
         create_regions(self.multiworld, self.player)
 
     def generate_output(self, output_directory: str):
+        try:
+            self._generate_output(output_directory)
+        finally:
+            # Always unblock modify_multidata, including when ROM output fails.
+            self.rom_name_available_event.set()
+
+    def _generate_output(self, output_directory: str):
         locs = [i for i in self.multiworld.get_locations(self.player)]
         data = {}
 
@@ -311,8 +374,7 @@ class FFVCDWorld(World):
             
         if os.path.exists(temp_patch_path):
             os.unlink(temp_patch_path)
-        
-        self.rom_name_available_event.set() # make sure threading continues and errors are collected
+
         logger.debug("Finished generate_output function")
         
     def fill_slot_data(self):
