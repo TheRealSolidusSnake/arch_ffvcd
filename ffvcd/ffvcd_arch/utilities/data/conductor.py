@@ -1685,7 +1685,7 @@ class Conductor():
                 endif
                 
                 
-                    ''' % i2b(self.RE.randint(0,65535))
+                    ''' % ("%04X" % self.RE.randint(0, 65535))
         
         
     def set_portal_boss(self, output_str):
@@ -2071,6 +2071,8 @@ class Conductor():
         # Pick 3 hints to say "X" item is at "Y" location
         
         for key in keys_hint1:
+            if key.collectible is None:
+                continue
             if key.collectible.name == "Arch Item":
                 # try to parse player name, if not, default to player number
                 try:
@@ -2371,17 +2373,20 @@ class Conductor():
         return patch
         
     def goal_settings(self):
-        goal_array = ["ExDeath1", "Pianos"]
-        goal_dict: Dict[str, bool]
-        goal_dict = {flag_name: False for flag_name in goal_array}
-
-        if self.arch_options["piano_percent"]:
-            goal_dict["Pianos"] = True
+        # Goal byte at ROM $FFFFFF / SNI $3FFFFF:
+        #   0x00 = final Exdeath / Neo Exdeath
+        #   bit 0 = Exdeath 2 in the World 2 castle
+        #   bit 1 = all pianos
+        goal = self.arch_options.get("goal")
+        if goal is None:
+            # Backward compatibility for older option dictionaries.
+            goal = 2 if self.arch_options.get("piano_percent", False) else 0
 
         goal_bitfield = 0
-        for i, flag_name in enumerate(goal_array):
-            if goal_dict[flag_name]:
-                goal_bitfield |= 1 << i
+        if goal == 1:
+            goal_bitfield |= 1 << 0
+        elif goal == 2:
+            goal_bitfield |= 1 << 1
 
         goal_bitfield = i2b(goal_bitfield)
         goals = "\n;Goals\norg $FFFFFF\ndb $%s" % (goal_bitfield)
