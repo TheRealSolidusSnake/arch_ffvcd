@@ -1,5 +1,16 @@
+import re
 from dataclasses import dataclass
 from Options import Toggle, DefaultOnToggle, Choice, PerGameCommonOptions, Range, OptionSet, FreeText, StartInventoryPool
+
+_FFV_NAME_RE = re.compile(r"[^A-Za-z0-9 ]")
+
+
+def sanitize_character_name(name: str, default: str) -> str:
+    """Career Day only accepts short alphanumeric names; fuzzer FreeText can hang ROM encoding."""
+    if not name:
+        return default
+    cleaned = _FFV_NAME_RE.sub("", str(name))[:6].strip()
+    return cleaned or default
 
 
 class JobPalettes(Toggle):

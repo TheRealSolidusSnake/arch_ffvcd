@@ -83,9 +83,13 @@ class LocalRom(object):
                 each_byte = line.split(" ")[1:]
                 each_byte = [i.replace(",","").replace("$","").strip() for i in each_byte if i]
                 for b in each_byte:
-                    if b:
+                    if not b:
+                        continue
+                    try:
                         master[new_loc] = int(b, base=16)
-                        new_loc += 1
+                    except ValueError:
+                        continue
+                    new_loc += 1
 
 
 
@@ -99,15 +103,19 @@ class LocalRom(object):
         self.buffer[new_loc + 2] = 0
         self.buffer[new_loc + 3] = 0
 
-        b = data[-6].split("dw ")[1].split("\n")[0].replace("$","")
-        b1 = b[:2]
-        b2 = b[2:]
-
-
+        color_hex = "0000"
+        for line in reversed(data):
+            if "dw $" not in line:
+                continue
+            color_hex = line.split("dw $", 1)[1].split()[0].strip().replace(",", "")
+            break
+        color_hex = color_hex.zfill(4)[-4:]
+        b1 = color_hex[:2]
+        b2 = color_hex[2:]
 
         for i in range(15):
-            self.buffer[new_loc + 4 + i * 2] = int(b2,base=16)
-            self.buffer[new_loc + 4 + i * 2 + 1] = int(b1,base=16)
+            self.buffer[new_loc + 4 + i * 2] = int(b2, base=16)
+            self.buffer[new_loc + 4 + i * 2 + 1] = int(b1, base=16)
 
 
 

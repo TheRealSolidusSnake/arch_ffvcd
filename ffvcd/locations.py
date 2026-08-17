@@ -10,6 +10,30 @@ LOC_TYPE_EVENT = 2
 LOC_TYPE_KEY = 3
 LOC_TYPE_TRACKER_EVENT = 4
 
+# Regions that only exist after World 2 Exdeath. These locations are omitted
+# from the pool when the goal is Exdeath 2.
+WORLD3_AREAS = frozenset({
+    "World 3 Access",
+    "Ancient Library (World 3)",
+    "Bal Castle Lower",
+    "Fork Tower",
+    "Great Trench",
+    "Istory Falls",
+    "Mirage Village",
+    "North Mountain (World 3)",
+    "Phoenix Tower",
+    "Pyramid",
+    "Rift (1 Tablet)",
+    "Rift (2 Tablets)",
+    "Rift (3 Tablets)",
+    "Rift (4 Tablets)",
+    "Rugor",
+    "Solitary Island",
+    "Tule Pass",
+    "Void",
+    "Walse Tower Sunken",
+})
+
 
 class LocationData:
     def __init__(self, name, address = None, parent = None, area = None, location_type="", type="Item"):

@@ -110,8 +110,11 @@ def create_event_item(event: str, classification, EVENT_CODE, player) -> Item:
 def create_world_events(world):
     for event in [i for i in event_table]:
         event_data = event_table[event]
+        try:
+            new_event_loc = world.multiworld.get_location(event_data.event_location, world.player)
+        except KeyError:
+            continue
         new_event_item = create_event_item(event_data.event_item, event_data.classification, event_data.code, world.player)
-        new_event_loc = world.multiworld.get_location(event_data.event_location, world.player)
         new_event_loc.address = event_data.code
         new_event_loc.event = True
         new_event_loc.place_locked_item(new_event_item)
@@ -126,6 +129,15 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
     ##################
     create_world_events(world)
 
+    world3_only_keys = {
+        "Pyramid Page",
+        "Shrine Page",
+        "Trench Page",
+        "Falls Page",
+        "Mirage Radar",
+    }
+    skip_world3_keys = world.options.goal.value == 1
+
     ##################
     # trapped chest items handling
     ##################
@@ -135,7 +147,8 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
         mib_item_data = dict({(i, item_table[i]) for i in item_table \
                               if(ITEM_CODE_MIB_REWARD in item_table[i].groups or \
                                 (world.options.trapped_chests_settings == 1 and ITEM_CODE_MIB_REWARD_PROG in item_table[i].groups \
-                                  and world.options.progression_checks != 0))})
+                                  and world.options.progression_checks != 0))
+                              and not (skip_world3_keys and i in world3_only_keys)})
         sorted_list = sorted(mib_item_data.items())
         sorted_dict = {}
         for key, value in sorted_list:
@@ -154,6 +167,8 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
     ##################
     placed_items = []
     for key_item_name in [i for i in item_table if ITEM_CODE_KEY_ITEMS in item_table[i].groups]:
+        if skip_world3_keys and key_item_name in world3_only_keys:
+            continue
         item_data = item_table[key_item_name]
         if item_data.classification == ItemClassification.progression and key_item_name not in mib_key_item_excludes:
             
@@ -176,22 +191,35 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
     for job_name in job_selection_dict:
         if job_name in world.options.jobs_included:
             initial_job_list.append(job_selection_dict[job_name])
-    world.random.shuffle(initial_job_list)
-    while True:
-        if (initial_job_list[-1] in [JOB_CODE_KNIGHT,JOB_CODE_MONK,JOB_CODE_THIEF,JOB_CODE_DRAGOON,JOB_CODE_NINJA,
-                                   JOB_CODE_SAMURAI,JOB_CODE_BERSERKER,JOB_CODE_HUNTER,JOB_CODE_MYSTIC_KNIGHT,
-                                   JOB_CODE_TRAINER,JOB_CODE_CHEMIST,JOB_CODE_GEOMANCER,JOB_CODE_BARD,JOB_CODE_DANCER] \
-                                   and initial_job_list[-2] in [JOB_CODE_WHITE_MAGE,JOB_CODE_BLACK_MAGE,JOB_CODE_TIME_MAGE,
-                                   JOB_CODE_SUMMONER,JOB_CODE_BLUE_MAGE,JOB_CODE_RED_MAGE]) or \
-                                   (initial_job_list[-1] in [JOB_CODE_WHITE_MAGE,JOB_CODE_BLACK_MAGE,JOB_CODE_TIME_MAGE,
-                                   JOB_CODE_SUMMONER,JOB_CODE_BLUE_MAGE,JOB_CODE_RED_MAGE] \
-                                   and initial_job_list[-2] in [JOB_CODE_KNIGHT,JOB_CODE_MONK,JOB_CODE_THIEF,JOB_CODE_DRAGOON,
-                                   JOB_CODE_NINJA,JOB_CODE_SAMURAI,JOB_CODE_BERSERKER,JOB_CODE_HUNTER,JOB_CODE_MYSTIC_KNIGHT,
-                                   JOB_CODE_TRAINER,JOB_CODE_CHEMIST,JOB_CODE_GEOMANCER,JOB_CODE_BARD,JOB_CODE_DANCER]):
-            early_crystal = initial_job_list[-2]
-            break
+    if not initial_job_list:
+        raise Exception("At least one job must be included.")
+
+    physical_jobs = {
+        JOB_CODE_KNIGHT, JOB_CODE_MONK, JOB_CODE_THIEF, JOB_CODE_DRAGOON, JOB_CODE_NINJA,
+        JOB_CODE_SAMURAI, JOB_CODE_BERSERKER, JOB_CODE_HUNTER, JOB_CODE_MYSTIC_KNIGHT,
+        JOB_CODE_TRAINER, JOB_CODE_CHEMIST, JOB_CODE_GEOMANCER, JOB_CODE_BARD, JOB_CODE_DANCER,
+    }
+    mage_jobs = {
+        JOB_CODE_WHITE_MAGE, JOB_CODE_BLACK_MAGE, JOB_CODE_TIME_MAGE,
+        JOB_CODE_SUMMONER, JOB_CODE_BLUE_MAGE, JOB_CODE_RED_MAGE,
+    }
+    physical_available = [job for job in initial_job_list if job in physical_jobs]
+    mage_available = [job for job in initial_job_list if job in mage_jobs]
+    # Prefer an early crystal that mixes a physical job with a mage job when both exist.
+    # Never shuffle forever: Mimic/Freelancer-only lists cannot satisfy that pairing.
+    if len(initial_job_list) >= 2 and physical_available and mage_available:
+        physical_choice = world.random.choice(physical_available)
+        mage_choice = world.random.choice(mage_available)
+        rest = [job for job in initial_job_list if job != physical_choice and job != mage_choice]
+        world.random.shuffle(rest)
+        if world.random.random() < 0.5:
+            initial_job_list = rest + [physical_choice, mage_choice]
         else:
-            world.random.shuffle(initial_job_list)
+            initial_job_list = rest + [mage_choice, physical_choice]
+        early_crystal = initial_job_list[-2]
+    else:
+        world.random.shuffle(initial_job_list)
+        early_crystal = initial_job_list[-1] if len(initial_job_list) == 1 else initial_job_list[-2]
             
             
     # This method of assignment guarantees that new memory is allocated for the shuffled list 
@@ -281,7 +309,8 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
                 placed_items.append(new_item)
     #Random by Job
     elif world.options.ability_settings == 3 and not world.options.four_job:
-        random_job_groups = world.multiworld.random.sample(initial_job_list,world.options.job_group_abilities_number) 
+        random_job_groups = world.multiworld.random.sample(
+            initial_job_list, min(world.options.job_group_abilities_number, len(initial_job_list))) 
         for item_name in [i for i in item_table if ITEM_CODE_ABILITIES in item_table[i].groups \
                            and any(y in random_job_groups for y in item_table[i].groups)]:
             if item_name not in starting_crystals:
@@ -389,8 +418,23 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
     
     # then calculate remaining    
     locations_this_world = [i for i in world.multiworld.get_locations(world.player)]
+    event_location_count = sum(1 for loc in locations_this_world if loc.address is None)
     
-    item_count_to_place = len(locations_this_world) - len(mib_items_to_place) - len(placed_items)
+    item_count_to_place = len(locations_this_world) - len(mib_items_to_place) - len(placed_items) - event_location_count
+    if item_count_to_place < 0:
+        overflow = -item_count_to_place
+        junk = []
+        for item in placed_items:
+            if item.advancement:
+                continue
+            groups = getattr(item, "groups", [])
+            if ITEM_CODE_GIL in groups or item.classification == ItemClassification.filler:
+                junk.append(item)
+        world.random.shuffle(junk)
+        junk.sort(key=lambda item: 0 if ITEM_CODE_GIL in getattr(item, "groups", []) else 1)
+        drop_ids = {id(item) for item in junk[:overflow]}
+        placed_items = [item for item in placed_items if id(item) not in drop_ids]
+        item_count_to_place = max(0, len(locations_this_world) - len(mib_items_to_place) - len(placed_items) - event_location_count)
     
     # get mib item names, if any
     mib_already_chosen_items = [i.name for i in mib_items_to_place]
@@ -415,7 +459,7 @@ def create_world_items(world, trapped_chests_flag = False, chosen_mib_locations 
                 
             placed_items.append(new_item)
 
-            if len(placed_items) + len(mib_items_to_place) >= len(locations_this_world) - len(event_table):
+            if len(placed_items) + len(mib_items_to_place) >= len(locations_this_world) - event_location_count:
                 break
 
         item_count_to_place -= filler_count
