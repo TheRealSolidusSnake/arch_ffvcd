@@ -1,14 +1,112 @@
 import Utils
-import bsdiff4
 import pkgutil
 from Utils import read_snes_rom, __version__
-from worlds.Files import APDeltaPatch
+from worlds.Files import APProcedurePatch, APTokenMixin, APTokenTypes
 
 USHASH = 'd69b2115e17d1cf2cb3590d3f75febb9'
 ROM_PLAYER_LIMIT = 65535
 
 import hashlib
 import os
+
+HIROM_FILE_OFFSET = 0xC00000
+DRAGON_PALETTE_ADDR = 0xC33320 - HIROM_FILE_OFFSET
+ROM_NAME_ADDR = 0x7FC0
+ROM_NAME_SIZE = 21
+
+
+def parse_career_day_asm(asm_text: str) -> dict:
+    """Parse Career Day ASM the same way the old LocalRom writer did.
+
+    The dragon palette block uses asar `dw`/`while` syntax, so it is reconstructed here instead of assembled.
+    """
+    writes = {}
+    new_loc = 0
+    lines = asm_text.splitlines()
+    for raw_line in lines:
+        line = raw_line.split(";")[0]
+        if "org" not in line and "db" not in line:
+            continue
+
+        if "org" in line:
+            new_loc = int(line.split("$")[1], base=16) - HIROM_FILE_OFFSET
+            continue
+        if "db" in line:
+            each_byte = line.split(" ")[1:]
+            each_byte = [i.replace(",", "").replace("$", "").strip() for i in each_byte if i]
+            for b in each_byte:
+                if not b:
+                    continue
+                try:
+                    writes[new_loc] = int(b, base=16)
+                except ValueError:
+                    continue
+                new_loc += 1
+
+    apply_dragon_palette_writes(writes, lines)
+    return writes
+
+
+def apply_dragon_palette_writes(writes: dict, lines) -> None:
+    writes[DRAGON_PALETTE_ADDR] = 0
+    writes[DRAGON_PALETTE_ADDR + 1] = 1
+    writes[DRAGON_PALETTE_ADDR + 2] = 0
+    writes[DRAGON_PALETTE_ADDR + 3] = 0
+
+    color_hex = "0000"
+    for line in reversed(lines):
+        if "dw $" not in line:
+            continue
+        color_hex = line.split("dw $", 1)[1].split()[0].strip().replace(",", "")
+        break
+    color_hex = color_hex.zfill(4)[-4:]
+    b1 = color_hex[:2]
+    b2 = color_hex[2:]
+
+    for i in range(15):
+        writes[DRAGON_PALETTE_ADDR + 4 + i * 2] = int(b2, base=16)
+        writes[DRAGON_PALETTE_ADDR + 4 + i * 2 + 1] = int(b1, base=16)
+
+
+def coalesce_byte_writes(writes: dict):
+    if not writes:
+        return []
+    items = sorted(writes.items())
+    ranges = []
+    start, prev = items[0][0], items[0][0]
+    buf = bytearray([items[0][1] & 0xFF])
+    for addr, value in items[1:]:
+        if addr == prev + 1:
+            buf.append(value & 0xFF)
+            prev = addr
+        else:
+            ranges.append((start, bytes(buf)))
+            start, prev = addr, addr
+            buf = bytearray([value & 0xFF])
+    ranges.append((start, bytes(buf)))
+    return ranges
+
+
+def build_rom_name(player: int, seed: int) -> bytearray:
+    rom_name = bytearray(f'K7{__version__.replace(".", "")[0:3]}_{player}_{seed:11}\0', 'utf8')[:ROM_NAME_SIZE]
+    rom_name.extend([0] * (ROM_NAME_SIZE - len(rom_name)))
+    return rom_name
+
+
+def get_basepatch_resource(four_job: bool, world_lock: int) -> str:
+    four_job_tag = "" if four_job else "no"
+    return f"ffvcd_arch/process/basepatch/ffv_{four_job_tag}fjf_world{world_lock}lock.bsdiff4"
+
+
+def load_basepatch_bytes(four_job: bool, world_lock: int) -> bytes:
+    resource = get_basepatch_resource(four_job, world_lock)
+    base_patch = pkgutil.get_data(__name__, resource)
+    if base_patch is None:
+        base_patch = pkgutil.get_data(__name__, resource.replace("/", os.sep))
+    if not base_patch:
+        raise FileNotFoundError(f"Missing Career Day basepatch {resource}")
+    return base_patch
+
 
 class LocalRom(object):
 
@@ -53,86 +151,44 @@ class LocalRom(object):
             self.buffer = bytearray(stream.read())
 
 
-    def write_randomizer_asm_to_file(self, basepatch_to_use, temp_patch_path, rompath):
-        # with open(basepatch_to_use, "rb") as f:
-        #     delta: bytes = f.read()
-
-
-        base_patch = pkgutil.get_data(__name__,basepatch_to_use)
-        self.rom_data = bsdiff4.patch(self.rom_data, base_patch)
-        self.write_rom_data_to_file(rompath)
-        self.read_from_file(self.original_file)
-
-        # the following code is taking a .asm file meant to be used with asar
-        # and instead manually updates all of the bytes
-
-        with open(temp_patch_path,'r') as f:
-            data = f.readlines()
-
-        master = {}
-        new_loc = 0
-        for line in data:
-            line = line.split(";")[0]
-            if "org" not in line and "db" not in line:
-                continue
-
-            if "org" in line:
-                new_loc = int(line.split("$")[1],base=16) - 0xC00000
-                continue
-            if "db" in line:
-                each_byte = line.split(" ")[1:]
-                each_byte = [i.replace(",","").replace("$","").strip() for i in each_byte if i]
-                for b in each_byte:
-                    if not b:
-                        continue
-                    try:
-                        master[new_loc] = int(b, base=16)
-                    except ValueError:
-                        continue
-                    new_loc += 1
-
-
-
-        for idx, b in master.items():
-            self.buffer[idx] = b
-
-        # dragon
-        new_loc = 0xC33320 - 0xC00000
-        self.buffer[new_loc] = 0
-        self.buffer[new_loc + 1] = 1
-        self.buffer[new_loc + 2] = 0
-        self.buffer[new_loc + 3] = 0
-
-        color_hex = "0000"
-        for line in reversed(data):
-            if "dw $" not in line:
-                continue
-            color_hex = line.split("dw $", 1)[1].split()[0].strip().replace(",", "")
-            break
-        color_hex = color_hex.zfill(4)[-4:]
-        b1 = color_hex[:2]
-        b2 = color_hex[2:]
-
-        for i in range(15):
-            self.buffer[new_loc + 4 + i * 2] = int(b2, base=16)
-            self.buffer[new_loc + 4 + i * 2 + 1] = int(b1, base=16)
-
-
-
 def patch_rom(multiworld, rom, player):
-    rom.name = bytearray(f'K7{__version__.replace(".", "")[0:3]}_{player}_{multiworld.seed:11}\0', 'utf8')[:21]
-    rom.name.extend([0] * (21 - len(rom.name)))
-    rom.write_bytes(0x7FC0, rom.name)
+    rom.name = build_rom_name(player, multiworld.seed)
+    rom.write_bytes(ROM_NAME_ADDR, rom.name)
 
 
-class FFVCDDeltaPatch(APDeltaPatch):
+class FFVCDProcedurePatch(APProcedurePatch, APTokenMixin):
     hash = USHASH
     game = "Final Fantasy V Career Day"
     patch_file_ending = ".apffvcd"
+    result_file_ending = ".sfc"
+
+    procedure = [
+        ("apply_bsdiff4", ["basepatch.bsdiff4"]),
+        ("apply_tokens", ["token_data.bin"]),
+    ]
 
     @classmethod
     def get_source_data(cls) -> bytes:
         return get_base_rom_bytes()
+
+
+FFVCDDeltaPatch = FFVCDProcedurePatch
+
+
+def create_ffvcd_procedure_patch(asm_text: str, four_job: bool, world_lock: int,
+                                 player: int, player_name: str, seed: int):
+    patch = FFVCDProcedurePatch(player=player, player_name=player_name)
+    patch.write_file("basepatch.bsdiff4", load_basepatch_bytes(four_job, world_lock))
+
+    writes = parse_career_day_asm(asm_text)
+    rom_name = build_rom_name(player, seed)
+    for i, value in enumerate(rom_name):
+        writes[ROM_NAME_ADDR + i] = value
+
+    for offset, data in coalesce_byte_writes(writes):
+        patch.write_token(APTokenTypes.WRITE, offset, data)
+    patch.write_file("token_data.bin", patch.get_token_binary())
+    return patch, rom_name
 
 
 def get_base_rom_bytes(file_name: str = "") -> bytes:

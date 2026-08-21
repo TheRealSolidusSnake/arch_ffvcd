@@ -15,11 +15,9 @@ from .rules import set_rules
 from .ffvcd_arch.utilities.data import conductor
 from .ffvcd_arch.utilities.data import collectible
 from .client import FFVCDSNIClient
-from .rom import LocalRom, get_base_rom_path, patch_rom, FFVCDDeltaPatch, USHASH
+from .rom import FFVCDProcedurePatch, USHASH, create_ffvcd_procedure_patch
 from collections import Counter
-import shutil
 import logging
-import pkgutil
 import settings
 from Fill import fill_restrictive
 
@@ -90,17 +88,6 @@ class FFVCDWorld(World):
         self.starting_crystals = None
         self.cond = None
         super().__init__(world, player)
-
-
-    @classmethod
-    def stage_assert_generate(cls, multiworld: MultiWorld):
-        rom_file = get_base_rom_path()
-        if not os.path.exists(rom_file):
-            raise FileNotFoundError(rom_file)
-        else:
-            import Utils
-            cls.rom_file = rom_file
-            cls.source_rom_abs_path = os.path.abspath(Utils.user_path(rom_file))
 
     def generate_early(self):
         self.starting_items = Counter()
@@ -273,7 +260,6 @@ class FFVCDWorld(World):
         options_conductor['goal'] = self.options.goal.value
         options_conductor['piano_percent'] = self.options.goal.value == 2
 
-        options_conductor['source_rom_abs_path'] = self.source_rom_abs_path
         options_conductor['world_lock'] = self.world_lock
         options_conductor['player'] = self.player
         options_conductor['player_name'] = self.multiworld.player_name[self.player]
@@ -336,44 +322,21 @@ class FFVCDWorld(World):
                                         placed_abilities = self.placed_abilities, placed_magic = self.placed_magic)
         self.cond.randomize()
 
-        # move 
-        temp_patch_path = self.cond.save_patch(output_directory)
-        self.filename_randomized = self.cond.patch_file(output_directory)
+        patch, rom_name = create_ffvcd_procedure_patch(
+            self.cond.patch,
+            four_job=bool(self.options_conductor['four_job']),
+            world_lock=int(self.options_conductor['world_lock']),
+            player=self.player,
+            player_name=self.multiworld.player_name[self.player],
+            seed=self.multiworld.seed,
+        )
+        self.rom_name = rom_name
 
-        rompath = os.path.join(output_directory, f"{self.multiworld.get_out_file_name_base(self.player)}.smc")
-
-        ################
-        # new system
-        ################
-        four_job = "" if self.options_conductor['four_job'] else 'no'
-        basepatch_to_use = os.path.join('ffvcd_arch', 
-                                        'process',
-                                        'basepatch',
-                                        "ffv_%sfjf_world%slock.bsdiff4" % (four_job,
-                                                              self.options_conductor['world_lock'])
-                                        )
-        logger.debug("Copying %s -> %s" % (self.source_rom_abs_path, rompath))        
-        shutil.copy(self.source_rom_abs_path, rompath)
-        rom = LocalRom(rompath)
-        rom.write_randomizer_asm_to_file(basepatch_to_use, temp_patch_path, rompath)
-        patch_rom(self.multiworld, rom, self.player)
-        self.rom_name = rom.name
-        rom.write_to_file(rompath)
-
-
-        patch = FFVCDDeltaPatch(os.path.splitext(rompath)[0]+FFVCDDeltaPatch.patch_file_ending, player=self.player,
-                                player_name=self.multiworld.player_name[self.player], patched_path=rompath)
-        
-        patch.write()
-
-        if os.path.exists(rompath):
-            os.unlink(rompath)
-
-        if os.path.exists(self.filename_randomized):
-            os.unlink(self.filename_randomized)
-            
-        if os.path.exists(temp_patch_path):
-            os.unlink(temp_patch_path)
+        patch_path = os.path.join(
+            output_directory,
+            f"{self.multiworld.get_out_file_name_base(self.player)}{FFVCDProcedurePatch.patch_file_ending}",
+        )
+        patch.write(patch_path)
 
         logger.debug("Finished generate_output function")
         
