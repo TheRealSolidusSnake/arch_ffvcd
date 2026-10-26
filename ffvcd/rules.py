@@ -3,6 +3,20 @@ from worlds.generic.Rules import add_rule, set_rule, forbid_item
 def set_rules(ffvcdworld):
     multiworld = ffvcdworld.multiworld
     player = ffvcdworld.player
+
+    piano_events = (
+        "Piano (Tule)", "Piano (Carwen)", "Piano (Karnak)", "Piano (Jacole)",
+        "Piano (Crescent)", "Piano (Mua)", "Piano (Rugor)", "Piano (Mirage)",
+    )
+    hero_song = multiworld.get_location(
+        "Crescent Island - Hero Song from Crescent Town (Hero)", player
+    )
+    # World 3 pianos cannot be reached before the Exdeath 2 goal. 
+    if ffvcdworld.options.goal.value == 1:
+        add_rule(hero_song, lambda state: False)
+    else:
+        add_rule(hero_song, lambda state: all(state.has(piano, player) for piano in piano_events))
+
     
     if ffvcdworld.options.goal.value == 1:
         multiworld.completion_condition[player] = \
